@@ -47,7 +47,7 @@ struct FeatureVisibility: Equatable {
         switch section {
         case .cleaner, .wallpapers:
             // Kept in the project for compatibility, but intentionally hidden
-            // from the app navigation by the custom PRIME AIMLOCK interface.
+            // from the app navigation by the custom Aujunpeak interface.
             return false
         case .home, .files, .patches:
             return true

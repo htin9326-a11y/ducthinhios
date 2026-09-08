@@ -222,7 +222,7 @@ private struct PatchProjectRow: View {
                     .foregroundStyle(.primary)
                 Text(item.isLocked
                      ? language.text("patch.tap_to_unlock")
-                     : "PRIME AIMLOCK V1 • Cấu hình đã sẵn sàng")
+                     : "Dexter VN • Cấu hình đã sẵn sàng")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -319,7 +319,7 @@ private struct PatchBrandPanel: View {
                     AppLogo(size: 44)
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 5) {
-                            Text("HUẤN HÀ VN")
+                            Text("ĐỨC THỊNH VN")
                                 .font(.system(size: 17, weight: .black, design: .rounded))
                             Image(systemName: "checkmark.seal.fill")
                                 .foregroundStyle(.blue)
@@ -342,7 +342,7 @@ private struct PatchBrandPanel: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Cấu hình đã sẵn sàng")
                         .font(.subheadline.weight(.semibold))
-                    Text(bundleIDs.first ?? "PRIME AIMLOCK V1")
+                    Text(bundleIDs.first ?? "Dexter VN")
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                 }
@@ -432,7 +432,7 @@ private struct PatchProjectDetailView: View {
                         .disabled(isWorking)
                     }
                 } footer: {
-                    Text("Trước khi áp dụng, PRIME AIMLOCK V1 sẽ lưu file gốc để có thể khôi phục khi cần.")
+                    Text("Trước khi áp dụng, Dexter VN sẽ lưu file gốc để có thể khôi phục khi cần.")
                 }
             }
         }

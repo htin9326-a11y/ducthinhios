@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("aujunpeak.appearance") private var appearanceMode = "system"
-    private let zaloURL = URL(string: "https://zalo.me/84827865031")!
+    private let zaloURL = URL(string: "https://zalo.me/0833091543")!
 
     var body: some View {
         NavigationStack {
@@ -13,7 +13,7 @@ struct SettingsView: View {
                         AppLogo(size: 54)
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
-                                Text("PRIME AIMLOCK V1")
+                                Text("Dexter VN")
                                     .font(.headline)
                                 Image(systemName: "checkmark.seal.fill")
                                     .foregroundStyle(.blue)
@@ -35,14 +35,14 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
                 }
 
-                Section("Admin") {
+                Section("ADMIN") {
                     HStack {
                         Label("Đức Thịnh VN", systemImage: "person.crop.circle.fill")
                         Spacer()
                         Image(systemName: "checkmark.seal.fill")
                             .foregroundStyle(.blue)
                     }
-                    LabeledContent("Ứng dụng", value: "PRIME AIMLOCK V1")
+                    LabeledContent("Ứng dụng", value: "Dexter VN")
                     Link(destination: zaloURL) {
                         Label("Liên hệ Zalo", systemImage: "message.fill")
                             .fontWeight(.semibold)
