@@ -440,7 +440,7 @@
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ThreeOneOSFive/Info.plist;
-INFOPLIST_KEY_CFBundleDisplayName = "PRIME AIMLOCK";
+				INFOPLIST_KEY_CFBundleDisplayName = "Dexter VN";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -474,7 +474,7 @@ INFOPLIST_KEY_CFBundleDisplayName = "PRIME AIMLOCK";
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ThreeOneOSFive/Info.plist;
-INFOPLIST_KEY_CFBundleDisplayName = "PRIME AIMLOCK";
+				INFOPLIST_KEY_CFBundleDisplayName = "Dexter VN";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

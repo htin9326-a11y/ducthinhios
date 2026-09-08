@@ -1,4 +1,4 @@
-PRIME AIMLOCK V1 - APP + ADMIN SERVER
+DEXTER VN - APP + ADMIN SERVER
 
 APP API URL hiện tại:
 http://103.140.249.74:8082/api
@@ -31,4 +31,4 @@ ADMIN:
 - Tạo/edit/xóa/bật/tắt switch từ server.
 
 LƯU Ý:
-Remote switch trong bản này quản lý trạng thái/cấu hình của chính PRIME AIMLOCK V1. Không có chức năng server tự ghi patch vào container của ứng dụng bên thứ ba.
+Remote switch trong bản này quản lý trạng thái/cấu hình của chính Dexter VN. Không có chức năng server tự ghi patch vào container của ứng dụng bên thứ ba.
