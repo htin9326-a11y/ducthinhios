@@ -1,4 +1,3 @@
-
 import Foundation
 import SwiftUI
 import UIKit
@@ -7,25 +6,19 @@ struct ContentView: View {
     @Environment(\.appLanguage) private var language
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @EnvironmentObject private var patchDraftCoordinator: PatchDraftCoordinator
-    @AppStorage(FeatureVisibility.cleanerStorageKey) private var cleanerEnabled = false
-    @AppStorage(FeatureVisibility.wallpapersStorageKey) private var wallpapersEnabled = false
+    @EnvironmentObject private var patchStore: PatchProjectStore
+    @EnvironmentObject private var repositoryStore: PackageRepositoryStore
+    @AppStorage(FeatureVisibility.developerModeStorageKey)
+    private var developerModeEnabled = false
     @State private var tabNavigation: AppTabNavigationState
+    @AppStorage("feature.cleaner.enabled") private var cleanerEnabled = false
+    @AppStorage("feature.wallpapers.enabled") private var wallpapersEnabled = false
+    @AppStorage("aujunpeak.selected.game") private var selectedGameKey = "freefire"
+    @State private var sideMenuExpanded = false
+    @State private var showSettings = false
 
     init() {
-#if targetEnvironment(simulator)
-        let arguments = ProcessInfo.processInfo.arguments
-        let initialTab: Int
-        if arguments.contains("--simulate-files-tab") {
-            initialTab = 1
-        } else if arguments.contains("--simulate-patch-tab") {
-            initialTab = 2
-        } else {
-            initialTab = 0
-        }
-        _tabNavigation = State(initialValue: AppTabNavigationState(selectedTab: initialTab))
-#else
         _tabNavigation = State(initialValue: AppTabNavigationState())
-#endif
     }
 
     var body: some View {
@@ -39,31 +32,50 @@ struct ContentView: View {
         .tint(AppTheme.accent)
         .imageScale(.small)
         .onChange(of: patchDraftCoordinator.request?.id) { requestID in
-            if requestID != nil { tabNavigation.select(AppSection.files.rawValue) }
+            if requestID != nil { tabNavigation.select(AppSection.installed.rawValue) }
         }
         .onChange(of: patchDraftCoordinator.importRequest?.id) { requestID in
-            if requestID != nil { tabNavigation.select(AppSection.files.rawValue) }
+            if requestID != nil { tabNavigation.select(AppSection.installed.rawValue) }
+        }
+        .onChange(of: developerModeEnabled) { _ in
+            tabNavigation.reconcileSelection(with: featureVisibility)
         }
         .onAppear {
             tabNavigation.reconcileSelection(with: featureVisibility)
         }
+        .sheet(isPresented: $showSettings) { SettingsView() }
+        .patchStorePresentation(patchStore)
+        .repositoryStorePresentation(repositoryStore, patchStore: patchStore)
     }
 
     private var compactLayout: some View {
-        sectionContent(selectedVisibleSection)
-            .id(selectedVisibleSection.rawValue)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                AppFloatingTabBar(
-                    sections: featureVisibility.visibleSections,
-                    selectedTab: tabNavigation.selectedTab,
-                    onSelect: { section in
-                        withAnimation(.spring(response: 0.36, dampingFraction: 0.84)) {
-                            tabNavigation.select(section.rawValue)
-                        }
-                    }
-                )
-            }
-            .animation(.easeInOut(duration: 0.24), value: selectedVisibleSection.rawValue)
+        ZStack(alignment: .leading) {
+            sectionContent(selectedVisibleSection)
+                .id(selectedVisibleSection.rawValue)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            AppSideNavigation(
+                sections: featureVisibility.visibleSections,
+                selectedTab: tabNavigation.selectedTab,
+                isExpanded: $sideMenuExpanded,
+                onSelect: { section in
+                    tabNavigation.select(section.rawValue)
+                    sideMenuExpanded = false
+                }
+            )
+            .padding(.leading, 8)
+            .frame(maxHeight: .infinity, alignment: .center)
+            .zIndex(80)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .topTrailing) {
+            persistentSettingsButton
+                .padding(.trailing, 14)
+                .padding(.top, 8)
+                .zIndex(200)
+        }
+        .animation(.easeInOut(duration: 0.18), value: selectedVisibleSection.rawValue)
+        .animation(.easeInOut(duration: 0.18), value: sideMenuExpanded)
     }
 
     private var regularLayout: some View {
@@ -75,35 +87,21 @@ struct ContentView: View {
                             tabNavigation.select(section.rawValue)
                         }
                     } label: {
-                        HStack(spacing: 10) {
-                            if UIImage(named: section.systemImage) != nil {
-                                Image(section.systemImage)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 18, height: 18)
-                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                            } else {
-                                Image(systemName: section.systemImage)
-                                    .frame(width: 18)
-                            }
-                            Text(section.displayTitle)
-                        }
-                        .fontWeight(section.rawValue == tabNavigation.selectedTab ? .semibold : .regular)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+                        Label(language.text(section.titleKey), systemImage: section.systemImage)
+                            .fontWeight(section.rawValue == tabNavigation.selectedTab ? .semibold : .regular)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(
                         section.rawValue == tabNavigation.selectedTab
-                        ? AppTheme.accent.opacity(0.14)
-                        : Color.clear
+                            ? AppTheme.accent.opacity(0.14)
+                            : Color.clear
                     )
-                    .accessibilityAddTraits(section.rawValue == tabNavigation.selectedTab ? .isSelected : [])
+                    .accessibilityAddTraits(
+                        section.rawValue == tabNavigation.selectedTab ? .isSelected : []
+                    )
                 }
-            }
-            .scrollContentBackground(.hidden)
-            .background {
-                AppAuroraBackground()
             }
             .navigationTitle("Dexter VN")
             .navigationSplitViewColumnWidth(min: 210, ideal: 240, max: 300)
@@ -112,6 +110,12 @@ struct ContentView: View {
                 .id(selectedVisibleSection.rawValue)
         }
         .navigationSplitViewStyle(.balanced)
+        .overlay(alignment: .topTrailing) {
+            persistentSettingsButton
+                .padding(.trailing, 14)
+                .padding(.top, 8)
+                .zIndex(200)
+        }
     }
 
     @ViewBuilder
@@ -122,24 +126,34 @@ struct ContentView: View {
                 cleanerEnabled: $cleanerEnabled,
                 wallpapersEnabled: $wallpapersEnabled,
                 wallpapersSupported: false,
-                onOpenGame: { _ in
+                onOpenGame: { gameKey in
                     tabNavigation.select(AppSection.files.rawValue)
+                    selectedGameKey = gameKey
                 }
             )
+        case .installed:
+            ZStack {
+                PatchProjectsView(
+                    onOpenSettings: openSettings,
+                    onOpenLogs: {}
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                KeyInfoOverlayView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .files:
             ZStack {
-                AppDataBrowserView(tabSession: filesTabSession)
+                AppDataBrowserView(
+                    tabSession: filesTabSession,
+                    onOpenSettings: openSettings,
+                    onOpenLogs: {}
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 FunctionOverlayView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        case .patches:
-            ZStack {
-                PatchProjectsView()
-                KeyInfoOverlayView()
-            }
-        case .cleaner:
-            CleanerView()
-        case .wallpapers:
-            WallpaperLabView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -158,26 +172,57 @@ struct ContentView: View {
     }
 
     private var featureVisibility: FeatureVisibility {
-        FeatureVisibility(cleanerEnabled: false, wallpapersEnabled: false, wallpapersSupported: false)
+        FeatureVisibility(developerModeEnabled: developerModeActive)
+    }
+
+    private var developerModeActive: Bool {
+#if targetEnvironment(simulator)
+        developerModeEnabled
+            || ProcessInfo.processInfo.arguments.contains("--simulate-developer-mode")
+            || ProcessInfo.processInfo.arguments.contains("--simulate-files-tab")
+#else
+        developerModeEnabled
+#endif
     }
 
     private var selectedVisibleSection: AppSection {
-        guard let section = AppSection(rawValue: tabNavigation.selectedTab), featureVisibility.isVisible(section) else {
-            return .home
-        }
-        return section
+        let selected = AppSection(rawValue: tabNavigation.selectedTab)
+        return selected.flatMap {
+            featureVisibility.isVisible($0) ? $0 : nil
+        } ?? .home
     }
+
+    private var persistentSettingsButton: some View {
+        Button(action: openSettings) {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .frame(width: 36, height: 36)
+                .background(AppTheme.surface, in: AujunpeakSlantedCardShape(cut: 8))
+                .overlay {
+                    AujunpeakSlantedCardShape(cut: 8)
+                        .stroke(AppTheme.borderStrong, lineWidth: 1)
+                }
+                .shadow(color: Color.black.opacity(0.22), radius: 8, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Cài đặt")
+    }
+
+    private func openSettings() {
+        showSettings = true
+    }
+
 }
 
-private struct CompactTabLabel: View {
+private struct CompactTabLabel: View
+ {
     let title: String
     let systemImage: String
 
     @ViewBuilder
     var body: some View {
-        if let customImage = UIImage(named: systemImage) {
-            Image(uiImage: customImage.withRenderingMode(.alwaysOriginal))
-        } else if let image = UIImage(
+        if let image = UIImage(
             systemName: systemImage,
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
         )?.withRenderingMode(.alwaysTemplate) {
@@ -190,91 +235,82 @@ private struct CompactTabLabel: View {
     }
 }
 
-private struct AppFloatingTabBar: View {
-    let sections: [AppSection]
-    let selectedTab: Int
-    let onSelect: (AppSection) -> Void
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(sections) { section in
-                Button {
-                    onSelect(section)
-                } label: {
-                    VStack(spacing: 5) {
-                        ZStack {
-                            if selectedTab == section.rawValue {
-                                Capsule()
-                                    .fill(AppTheme.accent.opacity(0.22))
-                                    .frame(width: 48, height: 30)
-                                    .matchedGeometryEffect(id: "selected-tab", in: tabNamespace)
-                            }
-                            if let customImage = UIImage(named: section.systemImage) {
-                                Image(uiImage: customImage.withRenderingMode(.alwaysTemplate))
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 17, height: 17)
-                                    .foregroundStyle(selectedTab == section.rawValue ? AppTheme.accent : Color.white.opacity(0.48))
-                            } else {
-                                Image(systemName: section.systemImage)
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(selectedTab == section.rawValue ? AppTheme.accent : Color.white.opacity(0.48))
-                            }
-                        }
-                        Text(section.displayTitle)
-                            .font(.system(size: 10, weight: selectedTab == section.rawValue ? .bold : .medium, design: .rounded))
-                            .foregroundStyle(selectedTab == section.rawValue ? .primary : .secondary)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedTab == section.rawValue ? .isSelected : [])
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.top, 7)
-        .padding(.bottom, 4)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.white.opacity(0.09))
-                .frame(height: 1)
-        }
-        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: selectedTab)
-    }
-
-    @Namespace private var tabNamespace
-}
-
 private extension AppSection {
-    var displayTitle: String {
+    var titleKey: String {
         switch self {
-        case .home: return "Trang chủ"
-        case .files: return "Function"
-        case .patches: return "Info"
-        case .cleaner: return "Cleaner"
-        case .wallpapers: return "Wallpapers"
+        case .home: return "tab.home"
+        case .installed: return "tab.installed"
+        case .files: return "tab.files"
         }
     }
 
     var systemImage: String {
         switch self {
         case .home: return "house.fill"
-        case .files: return "AujunpeakTabIcon"
-        case .patches: return "info.circle.fill"
-        case .cleaner: return "sparkles"
-        case .wallpapers: return "photo.on.rectangle.angled"
+        case .installed: return "key.fill"
+        case .files: return "wand.and.stars"
         }
+    }
+
+    var displayTitle: String {
+        switch self {
+        case .home: return "Home"
+        case .installed: return "Key Center"
+        case .files: return "Function"
+        }
+    }
+}
+private struct AppSideNavigation: View {
+    let sections: [AppSection]
+    let selectedTab: Int
+    @Binding var isExpanded: Bool
+    let onSelect: (AppSection) -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if isExpanded {
+                ForEach(sections) { section in
+                    Button { onSelect(section) } label: {
+                        Image(systemName: section.systemImage)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(selectedTab == section.rawValue ? AppTheme.secondaryAccent : .white.opacity(0.78))
+                            .frame(width: 38, height: 38)
+                            .background(
+                                selectedTab == section.rawValue ? AppTheme.secondaryAccent.opacity(0.18) : Color.black.opacity(0.48),
+                                in: Circle()
+                            )
+                            .overlay { Circle().stroke(Color.white.opacity(0.12), lineWidth: 1) }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(section.displayTitle)
+                    .transition(.scale.combined(with: .opacity))
+                }
+            }
+
+            Button {
+                isExpanded.toggle()
+            } label: {
+                Image(systemName: isExpanded ? "chevron.left" : "chevron.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(AppTheme.accent.opacity(0.88), in: Circle())
+                    .overlay { Circle().stroke(Color.white.opacity(0.18), lineWidth: 1) }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Đóng menu" : "Mở menu")
+        }
+        .padding(6)
+        .background(Color.black.opacity(isExpanded ? 0.32 : 0.12), in: Capsule())
+        .overlay { Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1) }
+        .shadow(color: Color.black.opacity(0.28), radius: 10, y: 4)
     }
 }
 
 private struct DashboardView: View {
     @EnvironmentObject private var licenseSession: LicenseSession
-    @State private var showSettings = false
     @State private var contentAppeared = false
+    @State private var showWelcomeNotice = true
     @Binding var cleanerEnabled: Bool
     @Binding var wallpapersEnabled: Bool
     let wallpapersSupported: Bool
@@ -284,110 +320,176 @@ private struct DashboardView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
-                AppNeonBackground()
+                AppTheme.base
                     .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 16) {
-                        Color.clear.frame(height: 68)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 18) {
+                        Color.clear.frame(height: 74)
+                        gameCenterHeader
                         shopBannerSection
                         gameGridSection
                         deviceMiniSection
                     }
+                    .frame(maxWidth: AppTheme.contentMaxWidth, alignment: .top)
+                    .frame(maxWidth: .infinity, alignment: .top)
                     .padding(.horizontal, 14)
                     .padding(.bottom, 28)
                     .opacity(contentAppeared ? 1 : 0)
-                    .offset(y: contentAppeared ? 0 : 14)
+                    .offset(y: contentAppeared ? 0 : 12)
                 }
 
-                HomeAdminOverlayCard()
-                    .padding(.horizontal, 14)
-                    .padding(.top, 8)
-                    .zIndex(10)
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { showSettings = true } label: {
-                        Image(systemName: "gearshape.fill")
-                    }
+                if showWelcomeNotice {
+                    welcomeNotice
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                        .transition(.move(edge: .bottom).combined(with: .opacity).combined(with: .scale(scale: 0.96)))
+                        .zIndex(20)
                 }
             }
-            .sheet(isPresented: $showSettings) { SettingsView() }
-            .task {
-                await licenseSession.refreshStatus()
-            }
+            .navigationBarTitleDisplayMode(.inline)
+            .task { await licenseSession.refreshStatus() }
             .onAppear {
-                withAnimation(.spring(response: 0.62, dampingFraction: 0.82).delay(0.08)) {
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.86).delay(0.05)) {
                     contentAppeared = true
+                }
+                Task {
+                    try? await Task.sleep(nanoseconds: 7_000_000_000)
+                    await MainActor.run {
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+                            showWelcomeNotice = false
+                        }
+                    }
                 }
             }
         }
     }
 
-    private var shopBannerSection: some View {
-        Link(destination: URL(string: "https://ducthinh.shop/")!) {
-            ZStack(alignment: .bottomLeading) {
-                if UIImage(named: "AujunpeakPromo") != nil {
-                    Image("AujunpeakPromo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 188)
-                        .clipped()
-                } else {
-                    LinearGradient(colors: [Color.blue, Color.black], startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .frame(height: 188)
+    private var welcomeNotice: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(AppTheme.surfaceElevated)
+                    .frame(width: 34, height: 34)
+                Image(systemName: "bell.badge.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Thông báo")
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text("Chào anh em mình là Huấn Hà đây • App Dexter VN cân Rank S1VN")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.88)) {
+                    showWelcomeNotice = false
                 }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .frame(width: 24, height: 24)
+                    .background(AppTheme.surface, in: Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(11)
+        .background(AppTheme.surface, in: AujunpeakSlantedCardShape(cut: 10))
+        .overlay {
+            AujunpeakSlantedCardShape(cut: 10)
+                .stroke(AppTheme.borderStrong, lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.25), radius: 16, y: 6)
+    }
+
+    private var gameCenterHeader: some View {
+        HStack(spacing: 12) {
+            AppLogo(size: 46)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("GAME CENTER")
+                    .font(.system(size: 16, weight: .black, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .tracking(0.8)
+                Text("Dexter VN")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(AppTheme.textSecondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Link(destination: URL(string: "https://zalo.me/84827865031")!) {
+                Image(systemName: "message.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .frame(width: 36, height: 36)
+                    .background(AppTheme.surfaceElevated, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .strokeBorder(AppTheme.borderStrong, lineWidth: 1)
+                    }
+            }
+        }
+        .padding(13)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(AppTheme.border, lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.20), radius: 12, y: 5)
+    }
+
+    private var shopBannerSection: some View {
+        Link(destination: URL(string: "https://ducthinh.shop")!) {
+            ZStack(alignment: .bottomLeading) {
+                BundledAnimatedGIFView(resourceName: "FunctionLiveBanner", resourceExtension: "gif")
+                    .frame(height: 170)
+                    .clipped()
+                    .background(AppTheme.surfaceElevated)
 
                 LinearGradient(
-                    colors: [Color.clear, Color.black.opacity(0.84)],
+                    colors: [Color.clear, Color.black.opacity(0.80)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("DEXTER VN")
-                        .font(.system(size: 24, weight: .black, design: .rounded))
+                        .font(.system(size: 23, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
-                    Text("Panel game • hiệu ứng sáng • nhấn để mở ducthinh.shop")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.82))
-                    HStack(spacing: 8) {
-                        Label("Shop chính thức", systemImage: "checkmark.seal.fill")
-                        Label("24/7", systemImage: "bolt.fill")
+                    HStack(spacing: 7) {
+                        Label("Shop chính thức", systemImage: "bag.fill")
+                        Label("ducthinh.shop", systemImage: "link")
                     }
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(.white.opacity(0.86))
                 }
                 .padding(16)
             }
             .frame(maxWidth: .infinity)
-            .background(Color.black)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .background(AppTheme.surface, in: AujunpeakSlantedCardShape(cut: 16))
+            .clipShape(AujunpeakSlantedCardShape(cut: 16))
             .overlay {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(LinearGradient(colors: [Color.cyan.opacity(0.75), Color.blue.opacity(0.18)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
+                AujunpeakSlantedCardShape(cut: 16)
+                    .stroke(AppTheme.borderStrong, lineWidth: 1.1)
             }
-            .shadow(color: Color.blue.opacity(0.24), radius: 22, y: 10)
+            .shadow(color: Color.black.opacity(0.24), radius: 14, y: 7)
         }
         .buttonStyle(.plain)
     }
 
     private var gameGridSection: some View {
         let games = homeGames
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Game Center")
-                        .font(.system(size: 18, weight: .black, design: .rounded))
-                    Text("Chạm để mở Function theo từng game")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
-
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+        return VStack(alignment: .leading, spacing: 11) {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 11) {
                 ForEach(games) { game in
                     Button {
                         selectedGameKey = game.gameKey
@@ -406,7 +508,7 @@ private struct DashboardView: View {
     }
 
     private var deviceMiniSection: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 11) {
             MiniInfoChip(icon: "iphone.gen3", title: "Thiết bị", value: AppInfo.displayMachineName)
             MiniInfoChip(icon: "checkmark.shield.fill", title: "Key", value: licenseSession.license?.status.uppercased() ?? "SYNC")
         }
@@ -439,25 +541,26 @@ private struct MiniInfoChip: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 7) {
                 Image(systemName: icon)
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.textPrimary)
                 Text(title)
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AppTheme.textSecondary)
             }
             Text(value)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AppTheme.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
-        .padding(14)
+        .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 17, style: .continuous)
+                .strokeBorder(AppTheme.border, lineWidth: 1)
         }
     }
 }
@@ -468,81 +571,43 @@ private struct HomeGameCard: View {
     let isSelected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            GameIconView(gameKey: game.gameKey, remoteURL: iconURL, size: 56, cornerRadius: 15)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(game.title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Text(game.bundleID)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.white.opacity(0.58))
-                    .lineLimit(2)
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                    Text("Mở nhanh")
+        AujunpeakPanel(cut: 12) {
+            HStack(spacing: 11) {
+                GameIconView(gameKey: game.gameKey, remoteURL: iconURL, size: 50, cornerRadius: 13)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .strokeBorder(AppTheme.borderStrong, lineWidth: 1)
+                    }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(game.title)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(AppTheme.textPrimary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                    Text(game.bundleID)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(AppTheme.textSecondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                    HStack(spacing: 6) {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "arrow.up.right")
+                        Text(isSelected ? "Đã chọn" : "Mở function")
+                            .lineLimit(1)
+                    }
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(AppTheme.textSecondary)
                 }
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(isSelected ? Color.orange : Color.white.opacity(0.72))
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
-            Spacer(minLength: 8)
+            .padding(11)
+            .frame(maxWidth: .infinity, minHeight: 104, alignment: .leading)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: isSelected ? [Color.orange.opacity(0.26), Color.red.opacity(0.12)] : [Color.white.opacity(0.08), Color.white.opacity(0.04)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-        )
         .overlay {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(isSelected ? Color.orange.opacity(0.42) : Color.white.opacity(0.06), lineWidth: 1)
+            AujunpeakSlantedCardShape(cut: 12)
+                .stroke(isSelected ? AppTheme.borderStrong : AppTheme.border, lineWidth: isSelected ? 1.35 : 1)
         }
-        .shadow(color: isSelected ? Color.orange.opacity(0.18) : .clear, radius: 16, y: 8)
-    }
-}
-
-private struct HomeAdminOverlayCard: View {
-    private let zaloURL = URL(string: "https://zalo.me/0833091543")!
-
-    var body: some View {
-        HStack(spacing: 12) {
-            AppLogo(size: 48)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("ADMIN ĐỨC THỊNH VN")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                Text("Dexter VN • Hỗ trợ & liên hệ")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 8)
-
-            Link(destination: zaloURL) {
-                HStack(spacing: 6) {
-                    Image(systemName: "message.fill")
-                    Text("Zalo")
-                        .fontWeight(.semibold)
-                }
-                .font(.subheadline)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .frame(height: 36)
-                .background(LinearGradient(colors: [Color.blue, Color.cyan], startPoint: .leading, endPoint: .trailing), in: Capsule())
-            }
-        }
-        .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(AppTheme.accent.opacity(0.22), lineWidth: 1)
-        }
-        .shadow(color: Color.black.opacity(0.18), radius: 18, y: 6)
+        .shadow(color: Color.black.opacity(0.18), radius: 8, y: 4)
     }
 }
 
@@ -551,6 +616,8 @@ private struct FunctionOverlayView: View {
     @AppStorage("aujunpeak.selected.game") private var selectedGameKey = "freefire"
     @State private var refreshToken = 0
     @State private var contentAppeared = false
+    @State private var showFunctionMenu = false
+    @State private var injectorNotice: String?
 
     private var availableGames: [RemoteGameSection] {
         let defaults = RemoteGameSection.fallbackGames
@@ -585,35 +652,46 @@ private struct FunctionOverlayView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppNeonBackground()
+                AppTheme.base
                     .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 16) {
-                        functionHeader
-                        gameSelector
-                        functionTargetCard
-                        remoteFunctions
-                        statusCard
-                            .id(refreshToken)
+                GeometryReader { proxy in
+                    let viewportWidth = max(proxy.size.width, 1)
+                    let horizontalInset: CGFloat = viewportWidth < 430 ? 12 : 18
+                    let maxContentWidth: CGFloat = 620
+                    let contentWidth = min(max(viewportWidth - (horizontalInset * 2), 0), maxContentWidth)
+
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(alignment: .center, spacing: 10) {
+                            VStack(alignment: .center, spacing: 10) {
+                                functionHeader
+                                if showFunctionMenu {
+                                    functionMenuPanel
+                                        .transition(.move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.96, anchor: .top)))
+                                }
+                                gameSelector
+                                functionTargetCard
+                                remoteFunctions
+                                injectorExternalButton
+                                statusCard
+                                    .id(refreshToken)
+                            }
+                            .frame(width: contentWidth)
+                            .clipped()
+                        }
+                        .frame(width: viewportWidth, alignment: .center)
+                        .padding(.bottom, 28)
+                        .opacity(contentAppeared ? 1 : 0)
+                        .offset(y: contentAppeared ? 0 : 10)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 30)
-                    .opacity(contentAppeared ? 1 : 0)
-                    .offset(y: contentAppeared ? 0 : 12)
+                    .frame(width: viewportWidth, height: proxy.size.height, alignment: .top)
+                    .scrollIndicators(.visible)
                 }
-                .refreshable { await licenseSession.refreshStatus() }
             }
-            .navigationTitle("Function")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("Dexter VN")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { Task { await licenseSession.refreshStatus() } } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            }
             .onAppear {
                 withAnimation(.spring(response: 0.58, dampingFraction: 0.84).delay(0.05)) {
                     contentAppeared = true
@@ -624,51 +702,76 @@ private struct FunctionOverlayView: View {
                 Task { await licenseSession.refreshStatus() }
             }
             .animation(.easeInOut(duration: 0.22), value: refreshToken)
+            .refreshable { await licenseSession.refreshStatus() }
         }
     }
 
     private var gameSelector: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(availableGames) { game in
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                            selectedGameKey = game.gameKey
-                        }
-                    } label: {
-                        HStack(spacing: 10) {
-                            GameIconView(gameKey: game.gameKey, remoteURL: resolvedIconURL(for: game), size: 42, cornerRadius: 12)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(game.title)
-                                    .font(.caption.weight(.bold))
-                                    .lineLimit(1)
-                                Text(game.bundleID)
-                                    .font(.caption2.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 6)
-                        }
-                        .padding(10)
-                        .frame(width: 200, alignment: .leading)
-                        .background((selectedGameKey == game.gameKey ? Color.orange.opacity(0.18) : Color.white.opacity(0.05)), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .strokeBorder(selectedGameKey == game.gameKey ? Color.orange.opacity(0.42) : Color.white.opacity(0.05), lineWidth: 1)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(minimum: 0), spacing: 10),
+                GridItem(.flexible(minimum: 0), spacing: 10)
+            ],
+            alignment: .center,
+            spacing: 8
+        ) {
+            ForEach(availableGames) { game in
+                gameSelectorButton(for: game)
             }
-            .padding(.horizontal, 1)
         }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func gameSelectorButton(for game: RemoteGameSection) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                selectedGameKey = game.gameKey
+            }
+        } label: {
+            HStack(spacing: 8) {
+                GameIconView(
+                    gameKey: game.gameKey,
+                    remoteURL: resolvedIconURL(for: game),
+                    size: 38,
+                    cornerRadius: 11
+                )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(game.title)
+                        .font(.system(size: 12.5, weight: .bold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Text(game.bundleID)
+                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 66, maxHeight: 66, alignment: .leading)
+            .contentShape(AujunpeakSlantedCardShape(cut: 10))
+            .background(AppTheme.surface, in: AujunpeakSlantedCardShape(cut: 10))
+            .overlay {
+                AujunpeakSlantedCardShape(cut: 10)
+                    .stroke(
+                        selectedGameKey == game.gameKey ? AppTheme.borderStrong : AppTheme.border,
+                        lineWidth: selectedGameKey == game.gameKey ? 1.3 : 1
+                    )
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private var remoteFunctions: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 7) {
             if visibleSwitches.isEmpty {
-                VStack(spacing: 10) {
-                    GameIconView(gameKey: currentGame.gameKey, remoteURL: resolvedIconURL(for: currentGame), size: 62, cornerRadius: 18)
+                VStack(spacing: 8) {
+                    GameIconView(gameKey: currentGame.gameKey, remoteURL: resolvedIconURL(for: currentGame), size: 56, cornerRadius: 16)
                     Text("Chưa có chức năng cho \(currentGame.title)")
                         .font(.headline.weight(.bold))
                     Text("Admin có thể thêm switch riêng, gắn package .3105 và đồng bộ trực tiếp cho game này.")
@@ -676,12 +779,12 @@ private struct FunctionOverlayView: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
-                .padding(18)
+                .padding(16)
                 .frame(maxWidth: .infinity)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
                 }
             } else {
                 ForEach(visibleSwitches) { item in
@@ -689,116 +792,255 @@ private struct FunctionOverlayView: View {
                         item: item,
                         onChange: { refreshToken &+= 1 }
                     )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
             if licenseSession.switches.isEmpty && licenseSession.lastError != nil {
                 HStack(spacing: 8) {
                     Image(systemName: "wifi.exclamationmark")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(AppTheme.textSecondary)
                     Text("Chức năng từ Admin tạm thời chưa đồng bộ")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Spacer()
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
                 }
-                .padding(12)
-                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(10)
+                .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var functionHeader: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(LinearGradient(colors: [AppTheme.accent.opacity(0.95), Color.black], startPoint: .topLeading, endPoint: .bottomTrailing))
-                if UIImage(named: "AujunpeakLogo") != nil {
-                    Image("AujunpeakLogo")
-                        .resizable()
-                        .scaledToFill()
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                } else {
-                    Image(systemName: "shield.lefthalf.filled")
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-            }
-            .frame(width: 64, height: 64)
-            .shadow(color: AppTheme.accent.opacity(0.35), radius: 12, y: 6)
-
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
-                    Text("Đức Thịnh VN")
-                        .font(.system(size: 19, weight: .black, design: .rounded))
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundStyle(.blue)
-                }
-                Text("Dexter VN")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.accent)
-                Text("Trung tâm chức năng game")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(16)
-        .background(LinearGradient(colors: [Color.white.opacity(0.06), Color.white.opacity(0.03)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(AppTheme.accent.opacity(0.28), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
-    }
-
-    private var functionTargetCard: some View {
-        HStack(spacing: 12) {
-            GameIconView(gameKey: currentGame.gameKey, remoteURL: resolvedIconURL(for: currentGame), size: 42, cornerRadius: 12)
+        HStack(spacing: 11) {
+            AppLogo(size: 44)
             VStack(alignment: .leading, spacing: 3) {
-                Text(currentGame.title)
-                    .font(.subheadline.weight(.semibold))
-                Text(currentGame.bundleID)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                Text("Dexter VN")
+                    .font(.system(size: 20, weight: .black, design: .rounded))
+                    .foregroundStyle(AppTheme.textPrimary)
+                Text("Chọn game và bật chức năng bạn cần")
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.textSecondary)
             }
-            Spacer()
-            Text(licenseSession.license?.status.uppercased() ?? "SYNC")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.red)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(AppTheme.accent.opacity(0.1), in: Capsule())
+            Spacer(minLength: 0)
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                    showFunctionMenu.toggle()
+                }
+            } label: {
+                Image(systemName: showFunctionMenu ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
-        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: .infinity, minHeight: 74)
+        .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 19, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(AppTheme.accent.opacity(0.16), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 19, style: .continuous)
+                .strokeBorder(AppTheme.border, lineWidth: 1)
         }
+        .shadow(color: Color.black.opacity(0.18), radius: 10, y: 5)
+    }
+
+    private var functionMenuPanel: some View {
+        HStack(spacing: 10) {
+            functionMenuIcon(title: "GAME", icon: "gamecontroller.fill")
+            functionMenuIcon(title: "SWITCH", icon: "switch.2")
+            functionMenuIcon(title: "KEY", icon: "key.fill")
+            Button { Task { await licenseSession.refreshStatus() } } label: {
+                VStack(spacing: 5) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 15, weight: .bold))
+                    Text("SYNC")
+                        .font(.system(size: 8.5, weight: .black, design: .rounded))
+                }
+                .foregroundStyle(AppTheme.textPrimary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .background(AppTheme.surfaceElevated, in: AujunpeakSlantedCardShape(cut: 9))
+                .overlay {
+                    AujunpeakSlantedCardShape(cut: 9)
+                        .stroke(AppTheme.borderStrong, lineWidth: 1)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(9)
+        .background(AppTheme.surface, in: AujunpeakSlantedCardShape(cut: 12))
+        .overlay {
+            AujunpeakSlantedCardShape(cut: 12)
+                .stroke(AppTheme.border, lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.22), radius: 12, y: 5)
+    }
+
+    private func functionMenuIcon(title: String, icon: String) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                showFunctionMenu = false
+            }
+        } label: {
+            VStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .bold))
+                Text(title)
+                    .font(.system(size: 8.5, weight: .black, design: .rounded))
+            }
+            .foregroundStyle(AppTheme.textPrimary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(AppTheme.surfaceElevated, in: AujunpeakSlantedCardShape(cut: 9))
+            .overlay {
+                AujunpeakSlantedCardShape(cut: 9)
+                    .stroke(AppTheme.border, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var functionBannerData: Data? { nil }
+
+    private var functionTargetCard: some View {
+        HStack(spacing: 9) {
+            GameIconView(
+                gameKey: currentGame.gameKey,
+                remoteURL: resolvedIconURL(for: currentGame),
+                size: 38,
+                cornerRadius: 10
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(currentGame.title)
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Text(currentGame.bundleID)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+
+            Text(licenseSession.license?.status.uppercased() ?? "SYNC")
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
+                .foregroundStyle(.red)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.red.opacity(0.10), in: Capsule())
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+        .clipped()
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.red.opacity(0.16), lineWidth: 1)
+        }
+    }
+
+    private var activeSwitchCount: Int {
+        visibleSwitches.filter { $0.enabled && LocalRemoteSwitchService.isEnabled($0) }.count
+    }
+
+    private var injectorExternalButton: some View {
+        let isFreeFire = currentGame.gameKey == "freefire" || currentGame.bundleID == "com.dts.freefire" || currentGame.bundleID == "com.dts.freefireth"
+        let enabled = isFreeFire && activeSwitchCount > 0
+        return Button {
+            openFreeFire()
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: enabled ? "arrow.up.forward.app.fill" : "lock.fill")
+                    .font(.system(size: 15, weight: .bold))
+                Text("Injector External")
+                    .font(.subheadline.weight(.black))
+                Spacer(minLength: 0)
+                Text(enabled ? "READY" : "BẬT FUNCTION")
+                    .font(.system(size: 8.5, weight: .black, design: .rounded))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(AppTheme.surface, in: Capsule())
+            }
+            .foregroundStyle(AppTheme.textPrimary)
+            .padding(.horizontal, 13)
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(enabled ? AppTheme.surfaceElevated : AppTheme.surface, in: AujunpeakSlantedCardShape(cut: 10))
+            .overlay {
+                AujunpeakSlantedCardShape(cut: 10)
+                    .stroke(enabled ? AppTheme.borderStrong : AppTheme.border, lineWidth: 1.1)
+            }
+            .shadow(color: Color.black.opacity(0.18), radius: 10, y: 4)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.58)
+        .alert("Không thể mở Free Fire", isPresented: Binding(
+            get: { injectorNotice != nil },
+            set: { if !$0 { injectorNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(injectorNotice ?? "Free Fire chưa cung cấp URL scheme có thể mở trực tiếp từ app này.")
+        }
+    }
+
+    private func openFreeFire() {
+        let schemes = ["freefire://", "freefireth://", "com.dts.freefire://", "com.dts.freefireth://"]
+        for raw in schemes {
+            guard let url = URL(string: raw) else { continue }
+            if UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url, options: [:]) { success in
+                    if !success {
+                        Task { @MainActor in
+                            injectorNotice = "iOS đã từ chối URL scheme \(raw)."
+                        }
+                    }
+                }
+                return
+            }
+        }
+        injectorNotice = "Không tìm thấy URL scheme đã đăng ký của Free Fire. Bundle ID hiện tại là \(currentGame.bundleID). iOS không cho phép mở app khác chỉ bằng bundle ID; Free Fire cần hỗ trợ custom URL scheme hoặc universal link."
     }
 
     private var statusCard: some View {
         let activeCount = visibleSwitches.filter { $0.enabled && LocalRemoteSwitchService.isEnabled($0) }.count
-        return HStack(spacing: 10) {
+        return HStack(alignment: .center, spacing: 8) {
             Image(systemName: activeCount > 0 ? "checkmark.seal.fill" : "circle.dashed")
                 .foregroundStyle(activeCount > 0 ? Color.green : Color.secondary)
+                .font(.system(size: 15, weight: .semibold))
+
             VStack(alignment: .leading, spacing: 2) {
                 Text("Trạng thái")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .lineLimit(1)
                 Text("\(currentGame.title): đang bật \(activeCount)/\(max(visibleSwitches.count, 1)) chức năng")
-                    .font(.caption)
+                    .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
             }
-            Spacer()
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+
             Text(activeCount > 0 ? "ACTIVE" : "READY")
-                .font(.caption2.weight(.bold))
+                .font(.system(size: 9.5, weight: .bold, design: .rounded))
                 .foregroundStyle(activeCount > 0 ? Color.green : Color.secondary)
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background((activeCount > 0 ? Color.green : Color.secondary).opacity(0.10), in: Capsule())
         }
-        .padding(14)
-        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -823,31 +1065,34 @@ private struct RemoteFunctionSwitchCard: View {
     }
 
     var body: some View {
-        HStack(spacing: 13) {
+        HStack(alignment: .center, spacing: 8) {
             ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isOn ? AppTheme.accent.opacity(0.16) : Color(uiColor: .tertiarySystemFill))
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(isOn ? AppTheme.surfaceElevated : AppTheme.surface)
                 if isBusy {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: item.icon.isEmpty ? "bolt.fill" : item.icon)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(isOn ? AppTheme.accent : Color.secondary)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isOn ? AppTheme.textPrimary : Color.secondary)
                 }
             }
-            .frame(width: 42, height: 42)
+            .frame(width: 34, height: 34)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(operationMessage ?? displaySubtitle)
-                    .font(.caption)
-                    .foregroundStyle(operationMessage?.hasPrefix("Lỗi:") == true ? Color.red : (item.enabled ? Color.secondary : Color.orange))
-                    .lineLimit(3)
-
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(operationMessage?.hasPrefix("Lỗi:") == true ? Color.red : AppTheme.textSecondary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .minimumScaleFactor(0.8)
             }
-
-            Spacer(minLength: 8)
+            .layoutPriority(1)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
             Toggle("", isOn: Binding(
                 get: { isOn },
@@ -861,13 +1106,19 @@ private struct RemoteFunctionSwitchCard: View {
                 }
             ))
             .labelsHidden()
+            .toggleStyle(.switch)
+            .tint(isOn ? AppTheme.textPrimary : AppTheme.secondaryAccent)
+            .frame(width: 46, alignment: .trailing)
+            .fixedSize(horizontal: true, vertical: false)
             .disabled(!item.enabled || isBusy)
         }
-        .padding(13)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 64, alignment: .leading)
+        .background(AppTheme.panel, in: AujunpeakSlantedCardShape(cut: 10))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(isOn ? AppTheme.accent.opacity(0.18) : Color.primary.opacity(0.04), lineWidth: 1)
+            AujunpeakSlantedCardShape(cut: 10)
+                .stroke(isOn ? AppTheme.borderStrong : AppTheme.border, lineWidth: 1.05)
         }
         .opacity(item.enabled ? 1 : 0.65)
         .onAppear { isOn = item.enabled && LocalRemoteSwitchService.isEnabled(item) }
@@ -1172,249 +1423,104 @@ private enum LocalRemoteSwitchService {
 private struct KeyInfoOverlayView: View {
     @EnvironmentObject private var licenseSession: LicenseSession
     @State private var contentAppeared = false
-    private let zaloURL = URL(string: "https://zalo.me/0833091543")!
 
     var body: some View {
         NavigationStack {
             ZStack {
-                AppNeonBackground()
+                AppTheme.base
                     .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: 16) {
-                        keyHeader
-                        keyDetails
-                        deviceDetails
-                        adminCard
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 14) {
+                        keyCard
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 30)
+                    .frame(maxWidth: 720, alignment: .top)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 10)
+                    .padding(.bottom, 26)
                     .opacity(contentAppeared ? 1 : 0)
                     .offset(y: contentAppeared ? 0 : 12)
                 }
-                .refreshable { await licenseSession.refreshStatus() }
             }
-            .navigationTitle("Info")
+            .navigationTitle("KEY")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button { Task { await licenseSession.refreshStatus() } } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            }
             .onAppear {
-                withAnimation(.spring(response: 0.58, dampingFraction: 0.84).delay(0.05)) {
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.86).delay(0.04)) {
                     contentAppeared = true
                 }
+                Task { await licenseSession.refreshStatus() }
             }
         }
     }
 
-    private var keyHeader: some View {
-        VStack(spacing: 0) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.12, green: 0.05, blue: 0.20),
-                                Color(red: 0.04, green: 0.10, blue: 0.22),
-                                Color.black
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-
-                Circle()
-                    .fill(AppTheme.accent.opacity(0.18))
-                    .frame(width: 210, height: 210)
-                    .blur(radius: 2)
-                    .offset(x: 145, y: -82)
-
-                Circle()
-                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                    .frame(width: 138, height: 138)
-                    .offset(x: 142, y: -54)
-
-                VStack(alignment: .leading, spacing: 17) {
-                    HStack(spacing: 11) {
-                        AppLogo(size: 52)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("DEXTER VN")
-                                .font(.system(size: 18, weight: .black, design: .rounded))
-                                .foregroundStyle(.white)
-                            Text("LICENSE CENTER")
-                                .font(.caption2.weight(.bold))
-                                .tracking(1.4)
-                                .foregroundStyle(.white.opacity(0.62))
-                        }
-
-                        Spacer()
-
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(AppTheme.accent)
-                    }
-
-                    HStack(alignment: .bottom, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("KEY INFORMATION")
-                                .font(.system(size: 20, weight: .black, design: .rounded))
-                                .foregroundStyle(.white)
-                            Text("Thông tin kích hoạt và thiết bị")
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.68))
-                        }
-
-                        Spacer(minLength: 8)
-
-                        Text(licenseStatusText)
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(licenseStatusColor)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(licenseStatusColor.opacity(0.16), in: Capsule())
-                            .overlay {
-                                Capsule()
-                                    .strokeBorder(licenseStatusColor.opacity(0.30), lineWidth: 1)
-                            }
-                    }
+    private var keyCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                AppLogo(size: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Dexter VN")
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .foregroundStyle(AppTheme.textPrimary)
+                    Text(licenseStatusText)
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(AppTheme.textSecondary)
                 }
-                .padding(18)
-            }
-            .frame(height: 168)
-
-            HStack(spacing: 0) {
-                InfoHeroStat(
-                    title: "THIẾT BỊ",
-                    value: "\(licenseSession.license?.deviceCount ?? 0)/\(licenseSession.license?.maxDevices ?? 0)",
-                    icon: "iphone"
-                )
-
-                Rectangle()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(width: 1, height: 30)
-
-                InfoHeroStat(
-                    title: "THỜI HẠN",
-                    value: "\(licenseSession.license?.durationDays ?? 0) ngày",
-                    icon: "calendar"
-                )
-
-                Rectangle()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(width: 1, height: 30)
-
-                InfoHeroStat(
-                    title: "VERSION",
-                    value: AppUpdateChecker.currentVersion,
-                    icon: "bolt.fill"
-                )
-            }
-            .padding(.vertical, 14)
-            .background(Color.black.opacity(0.24))
-        }
-        .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [AppTheme.accent.opacity(0.62), Color.blue.opacity(0.32), Color.white.opacity(0.10)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        }
-        .shadow(color: AppTheme.accent.opacity(0.18), radius: 24, y: 10)
-    }
-
-    private var keyDetails: some View {
-        InfoCard(title: "KEY", icon: "key.horizontal.fill") {
-            InfoLine(title: "Key", value: licenseSession.license?.key ?? licenseSession.storedKey, monospaced: true)
-            Divider()
-            InfoLine(title: "Trạng thái", value: licenseStatusText)
-            Divider()
-            InfoLine(title: "Kích hoạt", value: displayDate(licenseSession.license?.activatedAt))
-            Divider()
-            InfoLine(title: "Hết hạn", value: displayDate(licenseSession.license?.expiresAt))
-            Divider()
-            InfoLine(title: "Thời hạn", value: "\(licenseSession.license?.durationDays ?? 0) ngày")
-            Divider()
-            InfoLine(title: "Thiết bị", value: "\(licenseSession.license?.deviceCount ?? 0) / \(licenseSession.license?.maxDevices ?? 0)")
-
-            Button {
-                UIPasteboard.general.string = licenseSession.license?.key ?? licenseSession.storedKey
-            } label: {
-                Label("Sao chép Key", systemImage: "doc.on.doc")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 38)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(AppTheme.accent)
-            .padding(.top, 4)
-        }
-    }
-
-    private var deviceDetails: some View {
-        InfoCard(title: "THIẾT BỊ", icon: "iphone") {
-            InfoLine(title: "Model", value: AppInfo.hardwareDisplayName)
-            Divider()
-            InfoLine(title: "iOS", value: AppInfo.osVersion)
-            Divider()
-            InfoLine(title: "Build", value: AppInfo.osBuild, monospaced: true)
-            Divider()
-            InfoLine(title: "App version", value: AppUpdateChecker.currentVersion)
-            Divider()
-            InfoLine(title: "Device ID", value: licenseSession.deviceID, monospaced: true)
-        }
-    }
-
-    private var adminCard: some View {
-        InfoCard(title: "HỖ TRỢ", icon: "person.crop.circle.badge.checkmark") {
-            HStack {
-                Text("ADMIN").foregroundStyle(.secondary)
                 Spacer()
-                HStack(spacing: 5) {
-                    Text("Đức Thịnh VN")
-                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.blue)
-                }
+                Image(systemName: "key.fill")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .frame(width: 34, height: 34)
+                    .background(AppTheme.surfaceElevated, in: Circle())
             }
-            Divider()
-            InfoLine(title: "Panel", value: "Dexter VN License")
-            Divider()
-            InfoLine(title: "Kênh liên hệ", value: "Zalo")
-            Link(destination: zaloURL) {
-                Label("Liên hệ Admin qua Zalo", systemImage: "message.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 40)
-                    .background(LinearGradient(colors: [Color.blue, Color.cyan], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .padding(.top, 4)
+
+            Divider().overlay(AppTheme.border)
+
+            ReadOnlyKeyField(title: "KEY", value: licenseSession.license?.key ?? licenseSession.storedKey, monospaced: true)
+            ReadOnlyKeyField(title: "TRẠNG THÁI", value: licenseStatusText)
+            ReadOnlyKeyField(title: "KÍCH HOẠT", value: displayDate(licenseSession.license?.activatedAt))
+            ReadOnlyKeyField(title: "HẾT HẠN", value: displayDate(licenseSession.license?.expiresAt))
+            ReadOnlyKeyField(title: "THỜI HẠN", value: "\(licenseSession.license?.durationDays ?? 0) ngày")
+            ReadOnlyKeyField(title: "THIẾT BỊ", value: "\(licenseSession.license?.deviceCount ?? 0) / \(licenseSession.license?.maxDevices ?? 0)")
+            ReadOnlyKeyField(title: "DEVICE ID", value: licenseSession.deviceID, monospaced: true)
+            ReadOnlyKeyField(title: "MODEL", value: AppInfo.hardwareDisplayName)
+            ReadOnlyKeyField(title: "iOS", value: AppInfo.osVersion)
+            ReadOnlyKeyField(title: "BUILD", value: AppInfo.osBuild, monospaced: true)
+            ReadOnlyKeyField(title: "APP VERSION", value: AppUpdateChecker.currentVersion)
 
             Button(role: .destructive) {
                 licenseSession.forgetKey()
             } label: {
-                Label("Đổi / đăng xuất Key", systemImage: "rectangle.portrait.and.arrow.right")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 38)
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                    Text("Đổi / đăng xuất Key")
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(AppTheme.textPrimary)
+                .padding(.horizontal, 12)
+                .frame(height: 44)
+                .background(AppTheme.surfaceElevated, in: AujunpeakSlantedCardShape(cut: 9))
+                .overlay {
+                    AujunpeakSlantedCardShape(cut: 9)
+                        .stroke(AppTheme.border, lineWidth: 1)
+                }
             }
-            .buttonStyle(.bordered)
-            .padding(.top, 4)
+            .buttonStyle(.plain)
         }
+        .padding(14)
+        .background(AppTheme.surface, in: AujunpeakSlantedCardShape(cut: 14))
+        .overlay {
+            AujunpeakSlantedCardShape(cut: 14)
+                .stroke(AppTheme.borderStrong, lineWidth: 1.1)
+        }
+        .shadow(color: Color.black.opacity(0.22), radius: 16, y: 7)
     }
 
     private var licenseIsActive: Bool { licenseSession.license?.status == "active" }
-    private var licenseStatusColor: Color { licenseIsActive ? .green : .orange }
+    private var licenseStatusColor: Color { licenseIsActive ? AppTheme.textPrimary : AppTheme.textSecondary }
 
     private var licenseStatusText: String {
         switch licenseSession.license?.status {
@@ -1426,92 +1532,56 @@ private struct KeyInfoOverlayView: View {
         }
     }
 
-    private func displayDate(_ raw: String?) -> String {
-        guard let raw, !raw.isEmpty else { return "Chưa" }
-        let input = DateFormatter()
-        input.locale = Locale(identifier: "en_US_POSIX")
-        input.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        guard let date = input.date(from: raw) else { return raw }
-        let output = DateFormatter()
-        output.locale = Locale(identifier: "vi_VN")
-        output.dateFormat = "dd/MM/yyyy HH:mm"
-        return output.string(from: date)
+    private func displayDate(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "—" }
+        return value
     }
 }
 
-private struct InfoHeroStat: View {
-    let title: String
-    let value: String
-    let icon: String
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AppTheme.accent)
-            Text(value)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-            Text(title)
-                .font(.system(size: 9, weight: .bold))
-                .tracking(0.7)
-                .foregroundStyle(.white.opacity(0.52))
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-private struct InfoCard<Content: View>: View {
-    let title: String
-    let icon: String
-    let content: Content
-
-    init(title: String, icon: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.icon = icon
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .foregroundStyle(AppTheme.accent)
-                Text(title)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
-            }
-            content
-        }
-        .padding(15)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
-        }
-        .shadow(color: Color.black.opacity(0.18), radius: 16, y: 7)
-    }
-}
-
-private struct InfoLine: View {
+private struct ReadOnlyKeyField: View {
     let title: String
     let value: String
     var monospaced = false
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 10)
-            Text(value)
-                .font(monospaced ? .caption.monospaced() : .subheadline.weight(.semibold))
-                .multilineTextAlignment(.trailing)
-                .lineLimit(2)
-                .minimumScaleFactor(0.72)
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 9.5, weight: .black, design: .rounded))
+                    .foregroundStyle(AppTheme.textSecondary)
+                    .tracking(0.7)
+
+                TextField("", text: .constant(value))
+                    .font(.system(size: 14, weight: .semibold, design: monospaced ? .monospaced : .default))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .disabled(true)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                UIPasteboard.general.string = value
+            } label: {
+                Image(systemName: "doc.on.doc.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(AppTheme.textPrimary)
+                    .frame(width: 30, height: 30)
+                    .background(AppTheme.surface, in: Circle())
+                    .overlay {
+                        Circle().stroke(AppTheme.border, lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Sao chép \(title)")
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(AppTheme.base, in: AujunpeakSlantedCardShape(cut: 8))
+        .overlay {
+            AujunpeakSlantedCardShape(cut: 8)
+                .stroke(AppTheme.border, lineWidth: 1)
         }
     }
 }
@@ -1598,32 +1668,80 @@ private struct GameIconView: View {
     }
 }
 
-private struct AppNeonBackground: View {
+
+private struct SnowParticlesOverlay: View {
+    private struct Flake {
+        let seed: Double
+        let size: CGFloat
+        let speed: Double
+        let sway: CGFloat
+        let opacity: Double
+        let drift: Double
+    }
+
+    private static let flakes: [Flake] = (0..<78).map { index in
+        let i = Double(index)
+        let seed = (i * 0.61803398875).truncatingRemainder(dividingBy: 1.0)
+        let size = CGFloat(1.5 + ((i * 1.37).truncatingRemainder(dividingBy: 4.5)))
+        let speed = 0.055 + ((i * 0.017).truncatingRemainder(dividingBy: 0.075))
+        let sway = CGFloat(5 + ((i * 1.9).truncatingRemainder(dividingBy: 18)))
+        let opacity = 0.18 + ((i * 0.071).truncatingRemainder(dividingBy: 0.52))
+        let drift = 0.6 + ((i * 0.11).truncatingRemainder(dividingBy: 1.8))
+        return Flake(seed: seed, size: size, speed: speed, sway: sway, opacity: opacity, drift: drift)
+    }
+
     var body: some View {
         GeometryReader { proxy in
-            ZStack {
-                AppAuroraBackground()
-                if UIImage(named: "AppBackgroundNeon") != nil {
-                    Image("AppBackgroundNeon")
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .opacity(0.18)
-                        .blur(radius: 28)
-                }
-                LinearGradient(colors: [Color.black.opacity(0.12), Color.black.opacity(0.52), Color.black.opacity(0.88)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                ForEach(0..<18, id: \.self) { index in
-                    Capsule()
-                        .fill(index.isMultiple(of: 2) ? AppTheme.accent.opacity(0.10) : AppTheme.hotPink.opacity(0.08))
-                        .frame(width: CGFloat(18 + (index % 5) * 12), height: CGFloat(18 + (index % 5) * 12))
-                        .position(
-                            x: CGFloat((index * 41) % Int(max(proxy.size.width, 1))),
-                            y: CGFloat((index * 97) % Int(max(proxy.size.height, 1)))
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { timeline in
+                Canvas { context, size in
+                    let width = max(size.width, 1)
+                    let height = max(size.height, 1)
+                    let time = timeline.date.timeIntervalSince1970
+
+                    for flake in Self.flakes {
+                        let cycle = (time * flake.speed + flake.seed).truncatingRemainder(dividingBy: 1.0)
+                        let baseY = cycle * (height + 60) - 30
+                        let wave = sin((time * flake.drift) + flake.seed * 12.0)
+                        let xRatio = (flake.seed + wave * 0.018).truncatingRemainder(dividingBy: 1.0)
+                        let x = ((xRatio < 0 ? xRatio + 1 : xRatio) * width)
+                        let y = baseY
+                        let rect = CGRect(
+                            x: x,
+                            y: y,
+                            width: flake.size,
+                            height: flake.size
                         )
-                        .blur(radius: 2)
+
+                        context.opacity = flake.opacity
+                        context.fill(
+                            Path(ellipseIn: rect),
+                            with: .color(.white)
+                        )
+
+                        if flake.size >= 4.0 {
+                            let arm = flake.size * 1.25
+                            let center = CGPoint(x: x + flake.size / 2, y: y + flake.size / 2)
+                            var sparkle = Path()
+                            sparkle.move(to: CGPoint(x: center.x - arm, y: center.y))
+                            sparkle.addLine(to: CGPoint(x: center.x + arm, y: center.y))
+                            sparkle.move(to: CGPoint(x: center.x, y: center.y - arm))
+                            sparkle.addLine(to: CGPoint(x: center.x, y: center.y + arm))
+                            context.stroke(sparkle, with: .color(.white.opacity(0.45)), lineWidth: 0.6)
+                        }
+                    }
                 }
+                .frame(width: proxy.size.width, height: proxy.size.height)
             }
         }
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct AppNeonBackground: View {
+    var body: some View {
+        AppTheme.base
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
     }
 }

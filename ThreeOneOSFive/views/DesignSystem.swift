@@ -1,20 +1,27 @@
 import SwiftUI
+import ImageIO
+
 
 enum AppTheme {
-    static let accent = Color(
-        uiColor: UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(red: 0.20, green: 0.58, blue: 1.00, alpha: 1.00)
-                : UIColor(red: 0.12, green: 0.35, blue: 0.84, alpha: 1.00)
-        }
-    )
-    static let secondaryAccent = Color(red: 0.20, green: 0.88, blue: 1.00)
-    static let hotPink = Color(red: 0.72, green: 0.30, blue: 1.00)
-    static let pageBackground = Color(uiColor: .systemBackground)
-    static let consoleBackground = Color(uiColor: .secondarySystemBackground)
-    static let darkCanvas = Color(red: 0.035, green: 0.035, blue: 0.075)
-    static let panel = Color.white.opacity(0.075)
-    static let panelBorder = Color.white.opacity(0.12)
+    // Aujunpeak monochrome UI palette. The app surface is intentionally kept
+    // on one neutral base so every screen feels like the same product.
+    static let base = Color(red: 0.098039, green: 0.101961, blue: 0.109804) // #191A1C
+    static let surface = base
+    static let surfaceElevated = Color(red: 0.118, green: 0.122, blue: 0.130)
+    static let border = Color(red: 0.170, green: 0.180, blue: 0.195)
+    static let borderStrong = Color(red: 0.220, green: 0.230, blue: 0.245)
+    static let textPrimary = Color.white
+    static let textSecondary = Color.white.opacity(0.62)
+    static let accent = Color.white.opacity(0.92)
+    static let secondaryAccent = Color.white.opacity(0.74)
+    static let hotPink = Color.white.opacity(0.74)
+    static let darkCanvas = base
+    static let panel = surface
+    static let panelBorder = border
+    static let contentMaxWidth: CGFloat = 860
+    static let compactPageInset: CGFloat = 14
+    static let pageBackground = base
+    static let consoleBackground = surfaceElevated
     static let pageInset: CGFloat = 16
     static let rowIconSize: CGFloat = 17
     static let rowIconFrame: CGFloat = 28
@@ -24,6 +31,78 @@ enum AppTheme {
     static let appIconSize: CGFloat = 32
     static let emptyIconSize: CGFloat = 30
     static let selectionIconSize: CGFloat = 18
+    static let contentCardCornerRadius: CGFloat = 20
+    static let contentCardInset: CGFloat = 16
+    static let contentCardPadding: CGFloat = 16
+}
+
+struct AppCardBorder: View {
+    var body: some View {
+        RoundedRectangle(
+            cornerRadius: AppTheme.contentCardCornerRadius,
+            style: .continuous
+        )
+        .strokeBorder(
+            Color(uiColor: .separator).opacity(0.22),
+            lineWidth: 0.5
+        )
+        .accessibilityHidden(true)
+    }
+}
+
+struct AujunpeakSlantedCardShape: Shape {
+    var cut: CGFloat = 13
+
+    func path(in rect: CGRect) -> Path {
+        let c = min(cut, min(rect.width, rect.height) * 0.18)
+        var path = Path()
+        path.move(to: CGPoint(x: c, y: 0))
+        path.addLine(to: CGPoint(x: rect.width - c * 0.45, y: 0))
+        path.addLine(to: CGPoint(x: rect.width, y: c))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height - c * 0.7))
+        path.addLine(to: CGPoint(x: rect.width - c * 0.55, y: rect.height))
+        path.addLine(to: CGPoint(x: c, y: rect.height))
+        path.addLine(to: CGPoint(x: 0, y: rect.height - c))
+        path.addLine(to: CGPoint(x: 0, y: c))
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct AujunpeakTopSheetShape: Shape {
+    var radius: CGFloat = 28
+
+    func path(in rect: CGRect) -> Path {
+        let r = min(radius, min(rect.width, rect.height) * 0.25)
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: rect.height))
+        path.addLine(to: CGPoint(x: 0, y: r))
+        path.addQuadCurve(to: CGPoint(x: r, y: 0), control: CGPoint(x: 0, y: 0))
+        path.addLine(to: CGPoint(x: rect.width - r, y: 0))
+        path.addQuadCurve(to: CGPoint(x: rect.width, y: r), control: CGPoint(x: rect.width, y: 0))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height))
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct AujunpeakPanel<Content: View>: View {
+    let content: Content
+    var cut: CGFloat = 12
+
+    init(cut: CGFloat = 12, @ViewBuilder content: () -> Content) {
+        self.cut = cut
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .background(AppTheme.surface, in: AujunpeakSlantedCardShape(cut: cut))
+            .overlay {
+                AujunpeakSlantedCardShape(cut: cut)
+                    .stroke(AppTheme.border, lineWidth: 1)
+            }
+    }
 }
 
 struct AppRowIcon: View {
@@ -78,12 +157,12 @@ struct AppSearchField: View {
         .padding(.horizontal, 11)
         .frame(minHeight: 36)
         .background(
-            Color(uiColor: .secondarySystemFill),
+            AppTheme.surfaceElevated,
             in: RoundedRectangle(cornerRadius: 10, style: .continuous)
         )
         .padding(.horizontal, AppTheme.pageInset)
         .padding(.vertical, 8)
-        .background(.bar)
+        .background(AppTheme.base)
     }
 }
 
@@ -92,8 +171,12 @@ struct AppLogo: View {
 
     var body: some View {
         Group {
-            if UIImage(named: "AujunpeakLogo") != nil {
-                Image("AujunpeakLogo")
+            if let logo = UIImage(named: "AujunpeakLogo") {
+                Image(uiImage: logo)
+                    .resizable()
+                    .scaledToFill()
+            } else if let icon = UIImage(named: "AppIcon") {
+                Image(uiImage: icon)
                     .resizable()
                     .scaledToFill()
             } else {
@@ -101,19 +184,88 @@ struct AppLogo: View {
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.blue, Color.black],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .background(AppTheme.accent)
             }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
-        .shadow(color: .red.opacity(0.22), radius: max(4, size * 0.12), y: 3)
         .accessibilityHidden(true)
+    }
+}
+
+
+// MARK: - Dexter VN animated assets
+struct AnimatedGIFView: UIViewRepresentable {
+    let data: Data
+
+    func makeUIView(context: Context) -> UIImageView {
+        let view = UIImageView()
+        view.contentMode = .scaleAspectFill
+        view.clipsToBounds = true
+        configure(view)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIImageView, context: Context) {
+        if !uiView.isAnimating {
+            configure(uiView)
+        }
+    }
+
+    private func configure(_ view: UIImageView) {
+        let result = Self.frames(from: data)
+        view.animationImages = result.images
+        view.animationDuration = result.duration
+        view.animationRepeatCount = 0
+        view.startAnimating()
+    }
+
+    private static func frames(from data: Data) -> (images: [UIImage], duration: TimeInterval) {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return ([], 0)
+        }
+
+        let count = CGImageSourceGetCount(source)
+        var images: [UIImage] = []
+        var duration: TimeInterval = 0
+
+        for index in 0..<count {
+            guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil) else { continue }
+
+            var delay: TimeInterval = 0.08
+            if let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any],
+               let gif = properties[kCGImagePropertyGIFDictionary as String] as? [String: Any] {
+                let unclamped = gif[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double
+                let clamped = gif[kCGImagePropertyGIFDelayTime as String] as? Double
+                delay = max(unclamped ?? clamped ?? 0.08, 0.04)
+            }
+
+            images.append(UIImage(cgImage: cgImage))
+            duration += delay
+        }
+
+        return (images, max(duration, 0.8))
+    }
+}
+
+struct BundledAnimatedGIFView: View {
+    let resourceName: String
+    let resourceExtension: String
+    @State private var data: Data?
+
+    var body: some View {
+        Group {
+            if let data {
+                AnimatedGIFView(data: data)
+            } else {
+                Color.clear
+            }
+        }
+        .task {
+            guard data == nil,
+                  let url = Bundle.main.url(forResource: resourceName, withExtension: resourceExtension) else { return }
+            data = try? Data(contentsOf: url)
+        }
     }
 }
 
@@ -136,20 +288,12 @@ struct AppGlassPanel<Content: View>: View {
 
     var body: some View {
         content
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [tint.opacity(0.42), Color.white.opacity(0.07)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
+                    .strokeBorder(AppTheme.border, lineWidth: 1)
             }
-            .shadow(color: tint.opacity(0.10), radius: 24, y: 12)
+            .shadow(color: Color.black.opacity(0.28), radius: 14, y: 7)
     }
 }
 
@@ -172,58 +316,39 @@ struct AppCapsuleBadge: View {
 }
 
 struct AppGradientButtonStyle: ButtonStyle {
-    var colors: [Color] = [AppTheme.accent, AppTheme.hotPink]
+    var colors: [Color] = [AppTheme.surfaceElevated, AppTheme.base]
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .brightness(configuration.isPressed ? -0.04 : 0)
-            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+            .opacity(configuration.isPressed ? 0.82 : 1)
             .background(
                 LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: 17, style: .continuous)
+                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
             )
-            .shadow(color: colors.first?.opacity(0.28) ?? .clear, radius: 18, y: 8)
+            .overlay {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(AppTheme.borderStrong, lineWidth: 1)
+            }
+            .shadow(color: Color.black.opacity(0.22), radius: 8, y: 4)
+    }
+}
+
+struct AppAnimatedBackground: View {
+    var opacity: Double = 1
+
+    var body: some View {
+        AppTheme.base
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
 struct AppAuroraBackground: View {
-    @State private var animate = false
-
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                AppTheme.darkCanvas
-                Circle()
-                    .fill(AppTheme.accent.opacity(0.22))
-                    .frame(width: proxy.size.width * 0.92)
-                    .blur(radius: 70)
-                    .offset(x: animate ? proxy.size.width * 0.32 : -proxy.size.width * 0.34,
-                            y: animate ? -proxy.size.height * 0.25 : -proxy.size.height * 0.05)
-                Circle()
-                    .fill(AppTheme.hotPink.opacity(0.15))
-                    .frame(width: proxy.size.width * 0.72)
-                    .blur(radius: 80)
-                    .offset(x: animate ? -proxy.size.width * 0.28 : proxy.size.width * 0.28,
-                            y: animate ? proxy.size.height * 0.26 : proxy.size.height * 0.42)
-                Circle()
-                    .fill(AppTheme.secondaryAccent.opacity(0.10))
-                    .frame(width: 180, height: 180)
-                    .blur(radius: 42)
-                    .position(x: proxy.size.width * 0.84, y: proxy.size.height * 0.58)
-                LinearGradient(
-                    colors: [.clear, Color.black.opacity(0.36), Color.black.opacity(0.78)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
+        AppTheme.base
             .ignoresSafeArea()
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 9).repeatForever(autoreverses: true)) {
-                animate = true
-            }
-        }
-        .allowsHitTesting(false)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
